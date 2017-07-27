@@ -1,0 +1,96 @@
+
+#Select-AzureRmProfile -Path C:\azureprofile.json #Use Jeson token for login into your Azure account 
+
+##############Non-Interactive Login################
+$username = "Azure Login ID"
+$password = "Your Password" | ConvertTo-SecureString -AsPlainText -Force
+$mycred = new-object -typename System.Management.Automation.PSCredential -argumentlist $username,$password 
+Add-AzureRmAccount -Credential $mycred
+####################################################
+$Date = (Get-Date).ToUniversalTime()
+$DateC = $Date.ToString("dd-MM-yyyy")
+$subs = Get-AzureRmSubscription
+foreach ($sub in $subs)
+{
+Select-AzureRmSubscription -SubscriptionName $sub.SubscriptionName
+$vaults = Get-AzureRmRecoveryServicesVault
+$output = New-Object -TypeName psobject 
+$output | Add-Member -MemberType NoteProperty -Name "Subscription Name" -Value NotSet 
+$output | Add-Member -MemberType NoteProperty -Name "Vault Name" -Value NotSet 
+$output | Add-Member -MemberType NoteProperty -Name "Vault Resource Group" -Value NotSet
+$output | Add-Member -MemberType NoteProperty -Name "VM Name" -Value NotSet
+$output | Add-Member -MemberType NoteProperty -Name "VM Resource Group" -Value NotSet
+$output | Add-Member -MemberType NoteProperty -Name "Current Backup Job Status" -Value NotSet
+$output | Add-Member -MemberType NoteProperty -Name "Backup Start Time(UTC)" -Value NotSet
+$output | Add-Member -MemberType NoteProperty -Name "Backup End Time(UTC)" -Value NotSet
+$output | Add-Member -MemberType NoteProperty -Name "Duration" -Value NotSet
+$output | Add-Member -MemberType NoteProperty -Name "Backup Size" -Value NotSet
+$output | Add-Member -MemberType NoteProperty -Name "Backup Policy" -Value NotSet
+$output | Add-Member -MemberType NoteProperty -Name "Last Backup Job Status" -Value NotSet
+$output | Add-Member -MemberType NoteProperty -Name "Latest Recovery Point" -Value NotSet
+$output | Add-Member -MemberType NoteProperty -Name "Backup Type" -Value NotSet
+$output | Add-Member -MemberType NoteProperty -Name "Comments" -Value NotSet
+$count  = 0
+$countP = 0
+$countF = 0
+$countC = 0
+foreach($vault in $vaults){
+    $vault | Set-AzureRmRecoveryServicesVaultContext
+    $containers = Get-AzureRmRecoveryServicesBackupContainer -ContainerType AzureVM -BackupManagementType AzureVM
+       $jobs = Get-AzureRmRecoveryServicesBackupJob
+                    foreach($container in $containers){
+                    foreach($job in $jobs){
+                if($container.FriendlyName -eq $job.WorkloadName) 
+                {
+ $count += 1
+                    $backupItem = Get-AzureRmRecoveryServicesBackupItem -Container $container -WorkloadType AzureVM
+                    $jobDetail = Get-AzureRmRecoveryServicesBackupJobDetails -Job $job
+                    $output.'Subscription Name' = $sub.SubscriptionName
+                    $output.'Vault Name' = $vault.Name -join "`r`n"
+                    $output.'Vault Resource Group' = $vault.ResourceGroupName -join "`r`n"
+                    $output.'VM Name' = $job.WorkloadName -join "`r`n"
+                    $output.'VM Resource Group' = $container.ResourceGroupName -join "`r`n"
+                    $output.'Current Backup Job Status' = $job.Status -join "`r`n"
+                    $output.'Backup Start Time(UTC)' = $job.StartTime -join "`r`n"
+                    $output.'Backup End Time(UTC)' = $job.EndTime -join "`r`n"
+                    $time = $job.Duration.Days.ToString() + " Days " + $job.Duration.Hours.ToString() + " Hours " + $job.Duration.Minutes.ToString() + " Minutes " + $job.Duration.Seconds.ToString() + " Seconds"
+                    $output.Duration = $time
+                    $output.'Backup Size' = $jobDetail.Properties.'Backup Size'
+                    $output.'Backup Policy' = $backupItem.ProtectionPolicyName
+                    $output.'Last Backup Job Status' = $backupItem.LastBackupStatus
+    If($job.Status-eq "Completed")
+    {
+    $countC += 1
+    }
+    If($job.Status -eq "Failed")
+    {
+    $countF += 1
+    }
+    If($job.Status -eq "InProgress")
+    { 
+    $countP += 1
+    }
+                    $output.'Latest Recovery Point' = $backupItem.LatestRecoveryPoint
+                    $output.'Backup Type' = $job.BackupManagementType
+                    $output.'Comments' = $job.ErrorDetails 
+                    Export-Csv -InputObject $output -Path "C:\Azure_Daily_Backup_Report-$DateC.csv" -encoding ASCII -Append -NoTypeInformation          
+                }
+                }
+            }
+      }
+      }
+      
+#############Send Mail########################
+$credentials = new-object Management.Automation.PSCredential “your email id”, (“email id password” | ConvertTo-SecureString -AsPlainText -Force)
+$From = "Sender Email id"
+$To = "Receiver Email Id"
+$Attachment = "C:\Azure_Daily_Backup_Report-$DateC.csv"
+$Subject = "Azure_Daily_Backup_Report-" + "$DateC"
+$Body = "Hi All"+"`r`n"+"`r`n"+"PFA Daily Backup Report."+"`r`n"+"`r`n"+"Triggered Backup = $count"+"`r`n"+"Completed Backup = $countC"+"`r`n"+"InProgress Backup = $countP "+"`r`n"+"Failed Backup = $countF"+"`r`n"+"`r`n"+"`r`n"+ "`r`n"+"Regards"+"`r`n"+ " Your  Name"
+$SMTPServer = "smtp.gmail.com"  #Your SMTP Server name/ip
+$SMTPPort = "587" #SMTP port detail
+Send-MailMessage -From $From -to $To -Subject $Subject `
+-Body $Body -SmtpServer $SMTPServer -port $SMTPPort -UseSsl `
+-Credential $credentials -Attachments $Attachment
+###############Removing the file from local############################
+
